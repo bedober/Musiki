@@ -1,0 +1,8 @@
+import Fastify from 'fastify';import cors from '@fastify/cors';import helmet from '@fastify/helmet';import rateLimit from '@fastify/rate-limit';import {z} from 'zod';
+const app=Fastify({logger:true,trustProxy:true});await app.register(helmet);await app.register(cors,{origin:process.env.WEB_ORIGIN?.split(',')??false,credentials:true});await app.register(rateLimit,{max:120,timeWindow:'1 minute'});
+app.get('/health',async()=>({ok:true,service:'musiki-api',version:'0.1.0'}));
+app.get('/v1/catalog',async(req)=>{const q=z.object({q:z.string().optional(),limit:z.coerce.number().int().min(1).max(50).default(20)}).parse(req.query);return{items:[],query:q.q??null,limit:q.limit,note:'Connect Prisma and licensed catalogue storage to serve published tracks.'};});
+app.post('/v1/downloads/authorize',async(req,reply)=>{const body=z.object({trackId:z.string().min(1)}).safeParse(req.body);if(!body.success)return reply.code(400).send({error:'Invalid request'});return reply.code(501).send({error:'Authentication, subscription validation and signed storage URLs must be configured before enabling downloads.'});});
+app.post('/v1/payments/pesapal/ipn',async(req,reply)=>{return reply.code(501).send({error:'Configure Pesapal credentials and verify IPN signatures/status server-side before enabling payments.'});});
+app.setErrorHandler((error,req,reply)=>{req.log.error(error);reply.code(500).send({error:'Internal server error'});});
+const port=Number(process.env.PORT??4000);await app.listen({port,host:'0.0.0.0'});
