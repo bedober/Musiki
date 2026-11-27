@@ -13,7 +13,7 @@ Fastify + Prisma + PostgreSQL backend. Includes email/password authentication, J
 - POST /v1/auth/register { email, password, displayName }
 - POST /v1/auth/login { email, password }
 - GET /v1/auth/me (Bearer token)
-- GET /v1/catalog?q=&limit=&cursor=
+- GET /v1/catalog?q=&limit=&cursor=\n- GET /v1/tracks/:id/stream (short-lived signed playback URL)
 - GET /v1/playlists (Bearer token)
 - POST /v1/playlists { name } (Bearer token)
 - POST /v1/playlists/:id/tracks { trackId } (Bearer token)
@@ -24,7 +24,7 @@ Fastify + Prisma + PostgreSQL backend. Includes email/password authentication, J
 
 ## Production setup
 - Provision PostgreSQL and object storage (S3-compatible, e.g. Cloudflare R2); upload licensed audio under each Track.audioKey.
-- Configure Pesapal merchant credentials, register the IPN URL in Pesapal, set PESAPAL_IPN_ID and callback URL. Use live credentials only after testing the sandbox flow.
+- Configure OBJECT_STORAGE_ENDPOINT/REGION/BUCKET/ACCESS_KEY/SECRET_KEY and upload licensed audio objects.\n- Configure Pesapal merchant credentials, register the IPN URL in Pesapal, set PESAPAL_IPN_ID and callback URL. Use live credentials only after testing the sandbox flow.
 - Deploy API as a persistent Node/Fastify service or a supported container/server runtime. Configure WEB_ORIGIN, secrets, TLS, backups, monitoring, and rate limits.
 - Create ARTIST records and Track records with published=false; publish only after rights/metadata review.
 - Never put database, JWT, storage, or Pesapal secrets in the browser.
