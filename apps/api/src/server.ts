@@ -32,7 +32,7 @@ app.decorate('authenticate', async function (request: any, reply: any) {
   try { await request.jwtVerify(); } catch { return reply.code(401).send({ error: 'Authentication required' }); }
 });
 const auth = { preHandler: (app as any).authenticate };
-const publicUser = (u: any) => ({ id: u.id, email: u.email, displayName: u.displayName, role: u.role, plan: u.plan, planExpiresAt: u.planExpiresAt });
+const publicUser = (u: any) => ({ id: u.id, email: u.email, displayName: u.displayName, role: u.role, plan: u.plan === Plan.PREMIUM && u.planExpiresAt && u.planExpiresAt > new Date() ? Plan.PREMIUM : Plan.FREE, planExpiresAt: u.planExpiresAt });
 app.get('/health', async () => ({ ok: true, service: 'musiki-api', version: '1.0.0', database: await prisma.$queryRaw`SELECT 1`.then(() => 'connected').catch(() => 'unavailable') }));
 
 app.post('/v1/auth/register', async (req, reply) => {
@@ -123,6 +123,7 @@ app.get('/v1/payments/pesapal/ipn', async (req: any, reply) => {
     const statusRes = await fetch(base + '/api/Transactions/GetTransactionStatus?orderTrackingId=' + encodeURIComponent(q.data.OrderTrackingId), { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
     const status: any = await statusRes.json(); if (!statusRes.ok) throw new Error('Pesapal status lookup failed');
     const state = String(status.payment_status_description ?? '').toUpperCase();
+    if (String(status.merchant_reference) !== payment.reference || Number(status.amount ?? status.payment_amount) !== payment.amount || String(status.currency ?? status.payment_currency) !== payment.currency) return reply.code(400).send({ error: 'Payment details do not match the pending order' });
     if (state === 'COMPLETED') {
       const account = await prisma.user.findUnique({ where: { id: payment.userId } });
       const start = account?.planExpiresAt && account.planExpiresAt > new Date() ? account.planExpiresAt : new Date();
