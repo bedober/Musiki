@@ -150,8 +150,8 @@ app.post('/v1/artist/profile', auth, async (req: any, reply) => {
   if (!p.success) return reply.code(400).send({ error: 'Invalid artist profile', details: p.error.flatten() });
   if (!['LISTENER','ARTIST'].includes(req.user.role)) return reply.code(403).send({ error: 'This account cannot become an artist' });
   const artist = await prisma.artist.upsert({ where: { userId: req.user.id }, create: { userId: req.user.id, ...p.data }, update: p.data });
-  if (req.user.role === 'LISTENER') await prisma.user.update({ where: { id: req.user.id }, data: { role: 'ARTIST' } });
-  return reply.code(201).send({ artist });
+  const account = req.user.role === 'LISTENER' ? await prisma.user.update({ where: { id: req.user.id }, data: { role: 'ARTIST' } }) : await prisma.user.findUniqueOrThrow({ where: { id: req.user.id } });
+  return reply.code(201).send({ artist, user: publicUser(account), token: app.jwt.sign({ id: account.id, email: account.email, role: account.role, plan: account.plan }) });
 });
 app.get('/v1/artist/me', artistOnly, async (req: any, reply) => {
   const artist = await prisma.artist.findUnique({ where: { userId: req.user.id }, include: { tracks: { orderBy: { createdAt: 'desc' } } } });
@@ -180,8 +180,8 @@ app.post('/v1/labels/profile', auth, async (req: any, reply) => {
   if (!p.success) return reply.code(400).send({ error: 'Label name is required' });
   if (!['LISTENER','LABEL'].includes(req.user.role)) return reply.code(403).send({ error: 'This account cannot create a label' });
   const label = await prisma.label.create({ data: { name: p.data.name, ownerId: req.user.id } });
-  if (req.user.role === 'LISTENER') await prisma.user.update({ where: { id: req.user.id }, data: { role: 'LABEL' } });
-  return reply.code(201).send({ label });
+  const account = req.user.role === 'LISTENER' ? await prisma.user.update({ where: { id: req.user.id }, data: { role: 'LABEL' } }) : await prisma.user.findUniqueOrThrow({ where: { id: req.user.id } });
+  return reply.code(201).send({ label, user: publicUser(account), token: app.jwt.sign({ id: account.id, email: account.email, role: account.role, plan: account.plan }) });
 });
 app.get('/v1/labels/me', labelOnly, async (req: any) => ({ items: await prisma.label.findMany({ where: { ownerId: req.user.id }, orderBy: { name: 'asc' } }) }));
 app.get('/v1/admin/tracks/pending', adminOnly, async () => ({ items: await prisma.track.findMany({ where: { published: false }, include: { artist: { select: { stageName: true } } }, orderBy: { createdAt: 'asc' } }) }));
