@@ -58,6 +58,13 @@ app.get('/v1/catalog', async (req) => {
   const items = await prisma.track.findMany({ where, take: q.limit, ...(q.cursor ? { skip: 1, cursor: { id: q.cursor } } : {}), orderBy: { createdAt: 'desc' }, include: { artist: { select: { stageName: true } } } });
   return { items: items.map(t => ({ id: t.id, title: t.title, artist: t.artist.stageName, coverUrl: t.coverUrl, durationSeconds: t.durationSeconds, promoDownload: t.promoDownload, offlineAllowed: t.offlineAllowed })), nextCursor: items.length === q.limit ? items.at(-1)?.id : null };
 });
+app.get('/v1/tracks/:id/stream', async (req: any, reply) => {
+  const track = await prisma.track.findFirst({ where: { id: req.params.id, published: true } });
+  if (!track) return reply.code(404).send({ error: 'Track not found' });
+  if (!s3 || !process.env.OBJECT_STORAGE_BUCKET) return reply.code(503).send({ error: 'Audio storage is not configured' });
+  const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.OBJECT_STORAGE_BUCKET, Key: track.audioKey }), { expiresIn: 120 });
+  return { url, expiresIn: 120 };
+});
 app.get('/v1/playlists', auth, async (req: any) => prisma.playlist.findMany({ where: { userId: req.user.id }, include: { tracks: { include: { track: { include: { artist: { select: { stageName: true } } } } }, orderBy: { position: 'asc' } } }, orderBy: { createdAt: 'desc' } }));
 app.post('/v1/playlists', auth, async (req: any, reply) => {
   const p = z.object({ name: z.string().trim().min(1).max(80) }).safeParse(req.body); if (!p.success) return reply.code(400).send({ error: 'Playlist name is required' });
