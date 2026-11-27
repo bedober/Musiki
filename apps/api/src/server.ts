@@ -7,7 +7,7 @@ import { PrismaClient, Plan, PaymentStatus } from '@prisma/client';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const app = Fastify({ logger: true, trustProxy: true, bodyLimit: 1024 * 1024 });
@@ -134,6 +134,65 @@ app.get('/v1/payments/pesapal/ipn', async (req: any, reply) => {
     return { orderNotificationType: 'IPNCHANGE', orderTrackingId: q.data.OrderTrackingId, orderMerchantReference: q.data.OrderMerchantReference, status: 200 };
   } catch (e) { req.log.error(e); return reply.code(502).send({ error: 'Payment verification temporarily unavailable' }); }
 });
+
+// Role-aware artist, label and moderation APIs.
+function requireRole(...roles: string[]) {
+  return async (req: any, reply: any) => {
+    if (!roles.includes(req.user?.role)) return reply.code(403).send({ error: 'This account role cannot perform that action' });
+  };
+}
+const artistOnly = { preHandler: [auth.preHandler, requireRole('ARTIST')] };
+const labelOnly = { preHandler: [auth.preHandler, requireRole('LABEL')] };
+const adminOnly = { preHandler: [auth.preHandler, requireRole('ADMIN')] };
+
+app.post('/v1/artist/profile', auth, async (req: any, reply) => {
+  const p = z.object({ stageName: z.string().trim().min(2).max(80), bio: z.string().max(2000).optional(), imageUrl: z.string().url().optional() }).safeParse(req.body);
+  if (!p.success) return reply.code(400).send({ error: 'Invalid artist profile', details: p.error.flatten() });
+  if (!['LISTENER','ARTIST'].includes(req.user.role)) return reply.code(403).send({ error: 'This account cannot become an artist' });
+  const artist = await prisma.artist.upsert({ where: { userId: req.user.id }, create: { userId: req.user.id, ...p.data }, update: p.data });
+  if (req.user.role === 'LISTENER') await prisma.user.update({ where: { id: req.user.id }, data: { role: 'ARTIST' } });
+  return reply.code(201).send({ artist });
+});
+app.get('/v1/artist/me', artistOnly, async (req: any, reply) => {
+  const artist = await prisma.artist.findUnique({ where: { userId: req.user.id }, include: { tracks: { orderBy: { createdAt: 'desc' } } } });
+  if (!artist) return reply.code(404).send({ error: 'Create your artist profile first' });
+  return { artist };
+});
+app.post('/v1/artist/tracks/upload-url', artistOnly, async (req: any, reply) => {
+  const p = z.object({ fileName: z.string().min(1).max(180), contentType: z.enum(['audio/mpeg','audio/mp4','audio/aac','audio/ogg','audio/wav','audio/flac']), title: z.string().trim().min(1).max(120), durationSeconds: z.number().int().min(1).max(36000), coverUrl: z.string().url().optional() }).safeParse(req.body);
+  if (!p.success) return reply.code(400).send({ error: 'Invalid audio upload details', details: p.error.flatten() });
+  if (!s3 || !process.env.OBJECT_STORAGE_BUCKET) return reply.code(503).send({ error: 'Audio storage is not configured' });
+  const artist = await prisma.artist.findUnique({ where: { userId: req.user.id } });
+  if (!artist) return reply.code(400).send({ error: 'Create your artist profile first' });
+  const safeName = p.data.fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const audioKey = 'artist-uploads/' + artist.id + '/' + randomUUID() + '-' + safeName;
+  const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({ Bucket: process.env.OBJECT_STORAGE_BUCKET, Key: audioKey, ContentType: p.data.contentType }), { expiresIn: 600 });
+  const track = await prisma.track.create({ data: { title: p.data.title, durationSeconds: p.data.durationSeconds, coverUrl: p.data.coverUrl, audioKey, artistId: artist.id, published: false, promoDownload: false, offlineAllowed: true } });
+  return reply.code(201).send({ trackId: track.id, audioKey, uploadUrl, expiresIn: 600, requiredHeaders: { 'Content-Type': p.data.contentType }, status: 'PENDING_REVIEW' });
+});
+app.get('/v1/artist/tracks', artistOnly, async (req: any) => {
+  const artist = await prisma.artist.findUnique({ where: { userId: req.user.id } });
+  if (!artist) return { items: [] };
+  return { items: await prisma.track.findMany({ where: { artistId: artist.id }, orderBy: { createdAt: 'desc' } }) };
+});
+app.post('/v1/labels/profile', auth, async (req: any, reply) => {
+  const p = z.object({ name: z.string().trim().min(2).max(100) }).safeParse(req.body);
+  if (!p.success) return reply.code(400).send({ error: 'Label name is required' });
+  if (!['LISTENER','LABEL'].includes(req.user.role)) return reply.code(403).send({ error: 'This account cannot create a label' });
+  const label = await prisma.label.create({ data: { name: p.data.name, ownerId: req.user.id } });
+  if (req.user.role === 'LISTENER') await prisma.user.update({ where: { id: req.user.id }, data: { role: 'LABEL' } });
+  return reply.code(201).send({ label });
+});
+app.get('/v1/labels/me', labelOnly, async (req: any) => ({ items: await prisma.label.findMany({ where: { ownerId: req.user.id }, orderBy: { name: 'asc' } }) }));
+app.get('/v1/admin/tracks/pending', adminOnly, async () => ({ items: await prisma.track.findMany({ where: { published: false }, include: { artist: { select: { stageName: true } } }, orderBy: { createdAt: 'asc' } }) }));
+app.patch('/v1/admin/tracks/:id/review', adminOnly, async (req: any, reply) => {
+  const p = z.object({ published: z.boolean(), promoDownload: z.boolean().optional() }).safeParse(req.body);
+  if (!p.success) return reply.code(400).send({ error: 'Invalid moderation decision' });
+  const track = await prisma.track.findUnique({ where: { id: req.params.id } });
+  if (!track) return reply.code(404).send({ error: 'Track not found' });
+  return { track: await prisma.track.update({ where: { id: track.id }, data: { published: p.data.published, ...(p.data.promoDownload !== undefined ? { promoDownload: p.data.promoDownload } : {}) } }) };
+});
+
 app.setErrorHandler((error, req, reply) => { req.log.error(error); reply.code(500).send({ error: 'Internal server error' }); });
 app.addHook('onClose', async () => { await prisma.$disconnect(); });
 const port = Number(process.env.PORT ?? 4000);
