@@ -1,0 +1,3 @@
+# Musiki API
+Fastify API scaffold. Run `npm install`, configure `.env` from `.env.example`, run `npx prisma generate`, then `npm run dev`.
+The current catalog endpoint is an explicit empty placeholder. Authentication, Prisma-backed catalog, signed object-storage URLs, subscription enforcement and Pesapal IPN verification are not yet implemented. Do not expose this API publicly as production-ready until those controls are completed.
