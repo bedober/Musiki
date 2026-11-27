@@ -32,7 +32,7 @@ app.decorate('authenticate', async function (request: any, reply: any) {
   try { await request.jwtVerify(); } catch { return reply.code(401).send({ error: 'Authentication required' }); }
 });
 const auth = { preHandler: (app as any).authenticate };
-const publicUser = (u: any) => ({ id: u.id, email: u.email, displayName: u.displayName, role: u.role, plan: u.plan });
+const publicUser = (u: any) => ({ id: u.id, email: u.email, displayName: u.displayName, role: u.role, plan: u.plan, planExpiresAt: u.planExpiresAt });
 app.get('/health', async () => ({ ok: true, service: 'musiki-api', version: '1.0.0', database: await prisma.$queryRaw`SELECT 1`.then(() => 'connected').catch(() => 'unavailable') }));
 
 app.post('/v1/auth/register', async (req, reply) => {
@@ -82,10 +82,10 @@ app.post('/v1/downloads/authorize', auth, async (req: any, reply) => {
   const p = z.object({ trackId: z.string().min(1) }).safeParse(req.body); if (!p.success) return reply.code(400).send({ error: 'Invalid trackId' });
   const [user, track] = await Promise.all([prisma.user.findUnique({ where: { id: req.user.id } }), prisma.track.findFirst({ where: { id: p.data.trackId, published: true } })]);
   if (!user || !track) return reply.code(404).send({ error: 'Track not found' });
-  if (!track.offlineAllowed || (user.plan !== Plan.PREMIUM && !track.promoDownload)) return reply.code(403).send({ error: 'Offline download requires Premium or a promotional download entitlement' });
+  const premiumActive = user.plan === Plan.PREMIUM && !!user.planExpiresAt && user.planExpiresAt > new Date();\n  if (!track.offlineAllowed || (!premiumActive && !track.promoDownload)) return reply.code(403).send({ error: 'Offline download requires Premium or a promotional download entitlement' });
   if (!s3 || !process.env.OBJECT_STORAGE_BUCKET) return reply.code(503).send({ error: 'Offline storage is not configured yet' });
   const url = await getSignedUrl(s3, new GetObjectCommand({ Bucket: process.env.OBJECT_STORAGE_BUCKET, Key: track.audioKey }), { expiresIn: 300 });
-  await prisma.download.upsert({ where: { userId_trackId: { userId: user.id, trackId: track.id } }, create: { userId: user.id, trackId: track.id, entitlement: user.plan === Plan.PREMIUM ? 'PREMIUM' : 'PROMO' }, update: { entitlement: user.plan === Plan.PREMIUM ? 'PREMIUM' : 'PROMO' } });
+  await prisma.download.upsert({ where: { userId_trackId: { userId: user.id, trackId: track.id } }, create: { userId: user.id, trackId: track.id, entitlement: premiumActive ? 'PREMIUM' : 'PROMO' }, update: { entitlement: premiumActive ? 'PREMIUM' : 'PROMO' } });
   return { url, expiresIn: 300 };
 });
 
@@ -122,7 +122,7 @@ app.get('/v1/payments/pesapal/ipn', async (req: any, reply) => {
     const statusRes = await fetch(base + '/api/Transactions/GetTransactionStatus?orderTrackingId=' + encodeURIComponent(q.data.OrderTrackingId), { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } });
     const status: any = await statusRes.json(); if (!statusRes.ok) throw new Error('Pesapal status lookup failed');
     const state = String(status.payment_status_description ?? '').toUpperCase();
-    if (state === 'COMPLETED') await prisma.$transaction([prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.COMPLETED } }), prisma.user.update({ where: { id: payment.userId }, data: { plan: Plan.PREMIUM } })]);
+    if (state === 'COMPLETED') {\n      const account = await prisma.user.findUnique({ where: { id: payment.userId } });\n      const start = account?.planExpiresAt && account.planExpiresAt > new Date() ? account.planExpiresAt : new Date();\n      const expires = new Date(start); expires.setDate(expires.getDate() + 30);\n      await prisma.$transaction([prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.COMPLETED } }), prisma.user.update({ where: { id: payment.userId }, data: { plan: Plan.PREMIUM, planExpiresAt: expires } })]);\n    }
     else if (['FAILED', 'INVALID', 'REVERSED'].includes(state)) await prisma.payment.update({ where: { id: payment.id }, data: { status: PaymentStatus.FAILED } });
     return { orderNotificationType: 'IPNCHANGE', orderTrackingId: q.data.OrderTrackingId, orderMerchantReference: q.data.OrderMerchantReference, status: 200 };
   } catch (e) { req.log.error(e); return reply.code(502).send({ error: 'Payment verification temporarily unavailable' }); }
