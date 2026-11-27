@@ -1,0 +1,3 @@
+# Musiki Android
+Native Kotlin Android app scaffold (minSdk 26) using AndroidX Media3 ExoPlayer and MediaSessionService. Open this folder in Android Studio and sync Gradle.
+The current screen is a starter shell; the playback service is registered but UI-to-session controls, authenticated catalogue sync, DownloadService/DownloadManager, encrypted entitlement receipts, and release signing remain to be implemented. Do not treat this scaffold as a releasable APK.
