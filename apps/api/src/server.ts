@@ -195,5 +195,6 @@ app.patch('/v1/admin/tracks/:id/review', adminOnly, async (req: any, reply) => {
 
 app.setErrorHandler((error, req, reply) => { req.log.error(error); reply.code(500).send({ error: 'Internal server error' }); });
 app.addHook('onClose', async () => { await prisma.$disconnect(); });
-const port = Number(process.env.PORT ?? 4000);
-await app.listen({ port, host: '0.0.0.0' });
+
+// Vercel's Fastify runtime detects this exported app and adapts requests to Fastify.
+export default app;
