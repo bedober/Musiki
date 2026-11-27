@@ -3,7 +3,7 @@ datasource db { provider = "postgresql" url = env("DATABASE_URL") }
 enum Role { LISTENER ARTIST MANAGER LABEL ADMIN }
 enum Plan { FREE PREMIUM }
 enum PaymentStatus { PENDING COMPLETED FAILED REFUNDED }
-model User { id String @id @default(cuid()) email String @unique passwordHash String? displayName String role Role @default(LISTENER) plan Plan @default(FREE) createdAt DateTime @default(now()) updatedAt DateTime @updatedAt artist Artist? playlists Playlist[] downloads Download[] payments Payment[] }
+model User { id String @id @default(cuid()) email String @unique passwordHash String? displayName String role Role @default(LISTENER) plan Plan @default(FREE) planExpiresAt DateTime? createdAt DateTime @default(now()) updatedAt DateTime @updatedAt artist Artist? playlists Playlist[] downloads Download[] payments Payment[] }
 model Artist { id String @id @default(cuid()) userId String @unique user User @relation(fields:[userId],references:[id]) stageName String bio String? imageUrl String? tracks Track[] }
 model Label { id String @id @default(cuid()) name String ownerId String }
 model Track { id String @id @default(cuid()) title String artistId String artist Artist @relation(fields:[artistId],references:[id]) albumId String? audioKey String coverUrl String? durationSeconds Int promoDownload Boolean @default(false) offlineAllowed Boolean @default(true) published Boolean @default(false) createdAt DateTime @default(now()) downloads Download[] playlistTracks PlaylistTrack[] @@index([published, createdAt]) }
