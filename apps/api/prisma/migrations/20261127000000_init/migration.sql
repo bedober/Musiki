@@ -9,6 +9,7 @@ CREATE TABLE "User" (
   "displayName" TEXT NOT NULL,
   "role" "Role" NOT NULL DEFAULT 'LISTENER',
   "plan" "Plan" NOT NULL DEFAULT 'FREE',
+  "planExpiresAt" TIMESTAMP(3),
   "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updatedAt" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "User_pkey" PRIMARY KEY ("id")
